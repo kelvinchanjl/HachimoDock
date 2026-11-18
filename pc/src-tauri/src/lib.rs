@@ -117,6 +117,7 @@ mod media_catalog;
 mod media_dns;
 mod media_codec;
 mod local_widget_data;
+mod bambu_status;
 mod hotkeys;
 mod auth_provider;
 mod codex_composer;
@@ -12238,6 +12239,9 @@ pub fn run() {
             component_voice::component_speech_set_pet_voice,
             music_player::music_player_import,
             local_widget_data::local_widget_snapshot,
+            bambu_status::printer_bambu_snapshot,
+            bambu_status::printer_bambu_configure,
+            bambu_status::printer_bambu_forget,
             shared_location::shared_location_status,
             shared_location::shared_location_suggest,
             shared_location::shared_location_configure,

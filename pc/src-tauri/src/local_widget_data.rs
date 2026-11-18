@@ -26,6 +26,7 @@ pub fn local_widget_snapshot(source: String) -> Result<DataSnapshot, String> {
         "computer.status" => Ok(computer_status()),
         "location.current" => Ok(crate::shared_location::snapshot()),
         "todos.upcoming" => Ok(crate::todos::snapshot()),
+        "printer.bambu" => Ok(crate::bambu_status::device_snapshot()),
         other if crate::auth_provider::is_source(other) => crate::auth_provider::snapshot(other),
         _ => Err("不支持的数据源".into()),
     }
@@ -170,6 +171,9 @@ pub fn start(usb: crate::usb_serial::UsbSerialManager) {
                     continue;
                 }
                 let mut snapshots = vec![sample, crate::todos::snapshot()];
+                if crate::bambu_status::should_publish() {
+                    snapshots.push(crate::bambu_status::device_snapshot());
+                }
                 let location = crate::shared_location::snapshot();
                 if status.capabilities["widgetDataExpiry"] == "p4-data-expiry-v1" {
                 if let Ok(serialized) = serde_json::to_string(&location) {
