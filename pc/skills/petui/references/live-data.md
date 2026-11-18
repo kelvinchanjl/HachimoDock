@@ -31,6 +31,7 @@ PC 链路是「PC 提供器取数 → USB `widget/data` → P4 RAM 列表」。�
 | `computer.status` / `todos.upcoming` | 本机采样 / 本机待办（见 `pc/docs/local-live-widgets.md`） | 每 2 秒，30 秒过期 |
 | `github.me` | **鉴权提供器**：用户在 PC 组件详情填入自己创建的 GitHub OAuth App client_id，完成设备码授权后读取 `api.github.com/user` | 120 秒 TTL，失败保留上次结果并退避 |
 | `codex.usage` | **接口契约尚未确认，提供器未启用**：组件会显示"接口契约尚未确认"，不猜测端点、不冒充其他客户端 | — |
+| `printer.bambu` | PC 只读解析局域网状态报告，配置里的访问码只留在本机。不连接云、不向打印机发送命令。缩略图取图未启用 | 保存配置后才经 `widget/data` 推送列表投影；字段单位未核定时显示「—」 |
 
 鉴权提供器（`pc/src-tauri/src/auth_provider.rs`）的规则：端点与主机名是 PC 内置描述符，资源包只写
 `data.source`；令牌只存在这台电脑（macOS/Linux 为 0600 私有文件，Windows 为系统凭据库），不进包、
