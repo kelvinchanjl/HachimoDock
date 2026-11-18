@@ -45,6 +45,7 @@ test("the fixed Agents put ChatGPT（Codex） first and use it as the first-run 
       "deepseek-harness",
       "workbuddy",
       "hermes",
+      "grok-bot",
     ],
   );
   assert.deepEqual(

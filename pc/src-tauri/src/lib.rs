@@ -120,6 +120,7 @@ mod local_widget_data;
 mod hotkeys;
 mod auth_provider;
 mod codex_composer;
+mod grok_bot_voice;
 mod codex_import;
 mod component_library;
 mod secure_config;
@@ -701,9 +702,25 @@ fn agent_streams_voice_draft(agent_id: &str) -> bool {
 }
 
 fn device_voice_platform_block_reason(agent_id: &str, is_macos: bool) -> Option<&'static str> {
-    (agent_id == "mimocode" && !is_macos).then_some(
-        "MiMoCode 的按键语音输入目前仅支持 macOS 终端；当前系统可使用状态跟随与设备实时对话。",
-    )
+    if agent_id == "mimocode" && !is_macos {
+        return Some("MiMoCode 的按键语音输入目前仅支持 macOS 终端；当前系统可使用状态跟随与设备实时对话。");
+    }
+    if agent_id == grok_bot_voice::AGENT_ID {
+        let host = if is_macos {
+            "macos"
+        } else if cfg!(windows) {
+            "windows"
+        } else {
+            "other"
+        };
+        if let Some(code) = grok_bot_voice::adapter_block_reason(host) {
+            return Some(match code {
+                "unsupported_platform" => "Grok Bot 按键语音目前只能在 macOS 和 Windows 上写入已登记的前台输入框。当前系统不会向窗口输入。",
+                _ => "Grok Bot 输入目标尚未确认，未向窗口输入。",
+            });
+        }
+    }
+    None
 }
 
 fn visible_composer_agent_label(agent_id: &str) -> &'static str {
@@ -770,6 +787,60 @@ async fn connect_dsh_desktop(app: tauri::AppHandle) -> Result<serde_json::Value,
 async fn dsh_pair_session(session_id: String) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || dsh_desktop::pair(&session_id))
         .await.map_err(|_| "DeepSeek 配对未完成".to_string())?
+}
+
+#[tauri::command]
+fn grok_bot_voice_status() -> serde_json::Value {
+    grok_bot_voice::status_payload()
+}
+
+fn grok_bot_voice_idle() -> Result<(), String> {
+    let _gate = desktop_agent::composer_gate()?;
+    let active = active_device_voice_context()
+        .try_lock()
+        .map_err(|_| "请先结束本次语音输入，再登记 Grok Bot 输入框".to_string())?;
+    if active.is_some() {
+        return Err("请先结束本次语音输入，再登记 Grok Bot 输入框".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn grok_bot_voice_preview() -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        grok_bot_voice_idle()?;
+        grok_bot_voice::preview_focused(i32::try_from(std::process::id()).unwrap_or(-1))
+    })
+    .await
+    .map_err(|_| "Grok Bot 前台输入框读取未完成".to_string())?
+}
+
+#[tauri::command]
+async fn grok_bot_voice_commit() -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        grok_bot_voice_idle()?;
+        grok_bot_voice::commit_focused(i32::try_from(std::process::id()).unwrap_or(-1))
+    })
+    .await
+    .map_err(|_| "Grok Bot 前台输入框登记未完成".to_string())?
+}
+
+#[tauri::command]
+fn grok_bot_voice_clear() -> serde_json::Value {
+    grok_bot_voice::clear_registration()
+}
+
+#[tauri::command]
+async fn append_grok_bot_voice_draft(text: String) -> Result<(), String> {
+    if text.trim().is_empty() || text.chars().count() > 4000 {
+        return Err("请输入 1–4000 字的测试文本".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        grok_bot_voice_idle()?;
+        grok_bot_voice::append_registered(&text)
+    })
+    .await
+    .map_err(|_| "Grok Bot 草稿写入未完成".to_string())?
 }
 
 #[tauri::command]
@@ -1224,6 +1295,20 @@ fn device_voice_target_is_current(context: &DeviceVoiceContext) -> bool {
         let (agent_id, _) = resolve_usb_inject_target(&context.board_device_id);
         return agent_id == context.target.agent_id;
     }
+    if context.target.agent_id == grok_bot_voice::AGENT_ID {
+        if let Ok(binding) = p4_session_binding().lock() {
+            if binding.board_device_id == context.target.board_device_id
+                && binding.agent_id == context.target.agent_id
+            {
+                return true;
+            }
+        }
+        if context.target.generation != 0 {
+            return false;
+        }
+        let (agent_id, _) = resolve_usb_inject_target(&context.board_device_id);
+        return agent_id == context.target.agent_id;
+    }
     #[cfg(target_os = "macos")]
     if context.target.agent_id == "mimocode" {
         if let Ok(binding) = p4_session_binding().lock() {
@@ -1299,6 +1384,13 @@ fn claim_device_voice_final(final_handled: &AtomicBool) -> bool {
 }
 
 fn device_voice_composer_mode(context: &DeviceVoiceContext) -> &'static str {
+    if context.target.agent_id == grok_bot_voice::AGENT_ID {
+        return if grok_bot_voice::registered_identity().is_some() {
+            "registered-composer"
+        } else {
+            "unavailable"
+        };
+    }
     #[cfg(target_os = "macos")]
     if context.target.agent_id == "mimocode" {
         return if context
@@ -1624,6 +1716,38 @@ fn device_voice_finalization_target_is_current(context: &Arc<DeviceVoiceContext>
     false
 }
 
+fn deliver_grok_bot_voice_final(context: &Arc<DeviceVoiceContext>, revision: u64, text: &str) -> bool {
+    if context.target.agent_id != grok_bot_voice::AGENT_ID {
+        return false;
+    }
+    match grok_bot_voice::append_registered(text) {
+        Ok(()) => {
+            if let Ok(mut composer_error) = context.composer_error.lock() {
+                composer_error.clear();
+            }
+            context.draft_ready.store(true, Ordering::SeqCst);
+            emit_device_voice_transcript(context, "draft_ready", revision, text, true, true, "");
+            if context.confirm_on_ready.swap(false, Ordering::SeqCst) {
+                confirm_pending_device_voice_draft("input/event", &serde_json::json!({
+                    "action": "page_enter",
+                    "handledLocally": false,
+                    "boardDeviceId": context.board_device_id,
+                    "voiceUtteranceId": context.utterance_id,
+                }));
+            }
+        }
+        Err(error) => report_device_voice_delivery_failure(
+            context,
+            revision,
+            text,
+            &error,
+            "Grok Bot 语音草稿未写入，也未发送",
+            "GROK_BOT_DRAFT_FAILED",
+        ),
+    }
+    true
+}
+
 fn finalize_device_voice_final(
     context: Arc<DeviceVoiceContext>,
     revision: u64,
@@ -1660,6 +1784,10 @@ fn finalize_device_voice_final(
     });
     let _ = context.emitter.emit("voice-transcript", event.clone());
     let _ = context.emitter.emit("usb-audio-stream", event);
+
+    if deliver_grok_bot_voice_final(&context, revision, &text) {
+        return;
+    }
 
     #[cfg(target_os = "macos")]
     if context.target.agent_id == "mimocode" {
@@ -2006,6 +2134,61 @@ fn confirm_pending_device_voice_draft(topic: &str, payload: &serde_json::Value) 
                 ),
             },
         );
+        return true;
+    }
+
+    if context.target.agent_id == grok_bot_voice::AGENT_ID {
+        if !device_voice_target_is_current(&context) {
+            cancel_device_voice_context(&context, "Grok Bot voice target changed before submit");
+            return true;
+        }
+        let submit_context = context.clone();
+        let pending = text.clone();
+        if thread::Builder::new().name("pet-grok-bot-voice-submit".into()).spawn(move || {
+            if !device_voice_target_is_current(&submit_context) {
+                cancel_device_voice_context(&submit_context, "Grok Bot voice target changed before submit");
+                return;
+            }
+            match grok_bot_voice::submit_registered(&pending) {
+                Ok(()) if device_voice_target_is_current(&submit_context) => {
+                    emit_device_voice_transcript(&submit_context, "submitted", revision, &pending, true, true, "");
+                    let _ = submit_context.emitter.emit("usb-input-action-result", serde_json::json!({
+                        "ok": true,
+                        "pending": false,
+                        "view": "voice_input",
+                        "utteranceId": submit_context.utterance_id,
+                        "text": pending,
+                        "agentId": submit_context.target.agent_id,
+                        "sessionId": device_voice_session_id(&submit_context),
+                        "message": "已向已登记的 Grok Bot 输入框发送。这不是对方已读回执。",
+                        "composerMode": "registered-composer",
+                        "composerError": "",
+                    }));
+                    complete_device_voice_context(&submit_context);
+                }
+                Ok(()) => cancel_device_voice_context(
+                    &submit_context,
+                    "Grok Bot voice target changed during submit",
+                ),
+                Err(error) => report_device_voice_delivery_failure(
+                    &submit_context,
+                    revision,
+                    &pending,
+                    &error,
+                    "Grok Bot 确认发送失败，未自动重试",
+                    "GROK_BOT_SUBMIT_FAILED",
+                ),
+            }
+        }).is_err() {
+            report_device_voice_delivery_failure(
+                &context,
+                revision,
+                &text,
+                "无法启动 Grok Bot 确认发送",
+                "Grok Bot 确认发送未开始，未自动重试",
+                "GROK_BOT_SUBMIT_FAILED",
+            );
+        }
         return true;
     }
 
@@ -2434,6 +2617,10 @@ fn prepare_device_voice_agent(context: &DeviceVoiceContext) -> bool {
         return false;
     }
     let agent_id = &context.target.agent_id;
+    if agent_id == grok_bot_voice::AGENT_ID {
+        // Registration is explicit. Do not activate or search for an app by name.
+        return false;
+    }
     #[cfg(target_os = "macos")]
     if agent_id == "mimocode" {
         // MiMo has dedicated Desktop activation/unique-editor preparation below;
@@ -10643,6 +10830,7 @@ fn normalize_agent_id(value: &str) -> Option<String> {
         "mimo" | "mimo-code" | "mimocode" => Some("mimocode".to_string()),
         "deepseek-harness" | "deepseek" | "dsh" => Some("deepseek-harness".to_string()),
         "workbuddy" | "work-buddy" => Some("workbuddy".to_string()),
+        "grok-bot" | "grokbot" => Some("grok-bot".to_string()),
         "copilot" | "copilot-cli" => Some("copilot-cli".to_string()),
         "gemini" | "gemini-cli" => Some("gemini-cli".to_string()),
         "cursor" => Some("cursor".to_string()),
@@ -11183,6 +11371,7 @@ fn usb_source_display_name(source: &str) -> String {
         "deepseek-harness" | "deepseek" | "dsh" => "DeepSeek Harness".to_string(),
         "workbuddy" | "work-buddy" => "WorkBuddy".to_string(),
         "hermes" => "Hermes Agent".to_string(),
+        "grok-bot" | "grokbot" => "Grok Bot".to_string(),
         other if !other.is_empty() => other.to_string(),
         _ => "桌宠".to_string(),
     }
@@ -12284,6 +12473,11 @@ pub fn run() {
             button_config_signal,
             check_codex_accessibility_permission,
             write_workbuddy_voice_test_draft,
+            grok_bot_voice_status,
+            grok_bot_voice_preview,
+            grok_bot_voice_commit,
+            grok_bot_voice_clear,
+            append_grok_bot_voice_draft,
             check_voice_composer_readiness,
             dsh_connection_status,
             connect_dsh_desktop,
@@ -12665,6 +12859,7 @@ fn selected_agent_to_channel_id(value: &str) -> String {
         "deepseek-harness" => "deepseek-harness".to_string(),
         "workbuddy" => "workbuddy".to_string(),
         "hermes" => "hermes".to_string(),
+        "grok-bot" => "grok-bot".to_string(),
         _ => DEFAULT_PET_CHANNEL_ID.to_string(),
     }
 }
@@ -12678,6 +12873,7 @@ fn normalize_pet_channel_id(value: String) -> String {
         "deepseek-harness" | "deepseek" | "dsh" => "deepseek-harness".to_string(),
         "workbuddy" => "workbuddy".to_string(),
         "hermes" => "hermes".to_string(),
+        "grok-bot" | "grokbot" => "grok-bot".to_string(),
         "cursor" => "cursor".to_string(),
         _ => DEFAULT_PET_CHANNEL_ID.to_string(),
     }

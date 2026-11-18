@@ -155,6 +155,75 @@ function voicePhaseLabel(phase) {
   })[phase] || "处理中";
 }
 
+function GrokBotVoiceRegistration({ disabled }) {
+  const [status, setStatus] = useState(null);
+  const [message, setMessage] = useState("");
+  const [pending, setPending] = useState("");
+
+  const refresh = () => invoke("grok_bot_voice_status").then(setStatus).catch((error) => {
+    setMessage(String(error));
+  });
+  useEffect(() => { refresh(); }, []);
+
+  const run = (action) => {
+    setPending(action);
+    const command = action === "preview"
+      ? "grok_bot_voice_preview"
+      : action === "commit"
+        ? "grok_bot_voice_commit"
+        : "grok_bot_voice_clear";
+    invoke(command)
+      .then((result) => {
+        setStatus(result);
+        setMessage(action === "clear"
+          ? "已清除登记。松开录音不会输入文字。"
+          : action === "preview"
+            ? "请核对下面的应用和窗口标题，确认这就是要写入的对话。"
+            : "已登记。之后只有这个输入框仍在前台时才会追加文字。");
+      })
+      .catch((error) => setMessage(String(error)))
+      .finally(() => setPending(""));
+  };
+
+  const registered = status?.registered === true;
+  const preview = status?.preview === true;
+  return (
+    <section className="voice-panel__advanced" aria-label="Grok Bot 输入框登记">
+      <div className="voice-panel__advanced-summary">
+        <span className="voice-panel__advanced-copy">
+          <strong>Grok Bot 前台输入框</strong>
+          <small>
+            {preview
+              ? `待确认：${status.processName || "未知应用"} · ${status.windowTitle || "无标题"}`
+              : registered
+                ? `已登记：${status.processName || "未知应用"} · ${status.windowTitle || "无标题"}`
+                : "尚未登记。请先点中 Grok Bot 里要发送的那条对话的输入框。"}
+          </small>
+        </span>
+      </div>
+      <div className="voice-panel__advanced-body">
+        <p>
+          按住录音键只负责识别。松开后把文字追加到已登记输入框，不会发送。
+          需要再短按确认键或摇杆，才会向同一个输入框发送。
+          语音识别沿用现有 API 配置，不使用 Grok Bot 账号，也不会申请辅助功能权限。
+        </p>
+        <div className="voice-panel__mock-actions">
+          <button type="button" className="btn-secondary btn-sm" disabled={disabled || pending !== ""} onClick={() => run("preview")}>
+            {pending === "preview" ? "读取中..." : "读取当前前台输入框"}
+          </button>
+          <button type="button" className="btn-primary btn-sm" disabled={disabled || !preview || pending !== ""} onClick={() => run("commit")}>
+            {pending === "commit" ? "登记中..." : "确认登记此输入框"}
+          </button>
+          <button type="button" className="btn-secondary btn-sm" disabled={disabled || (!registered && !preview) || pending !== ""} onClick={() => run("clear")}>
+            清除登记
+          </button>
+        </div>
+        {message && <small role="status">{message}</small>}
+      </div>
+    </section>
+  );
+}
+
 export default function VoiceAssistantPanel({
   state,
   dispatch,
@@ -463,6 +532,9 @@ export default function VoiceAssistantPanel({
         )}
       </section>
 
+      {state.selectedAgentId === "grok-bot" && (
+        <GrokBotVoiceRegistration disabled={["listening", "partial", "finalizing", "submitting"].includes(voicePhase)} />
+      )}
 
       <div className="voice-panel__advanced-grid">
         <button
@@ -545,7 +617,7 @@ export default function VoiceAssistantPanel({
                 ) : (
                   <>
                     <Send size={14} aria-hidden="true" />
-                    {state.selectedAgentId === "workbuddy" ? "只写入 WorkBuddy 草稿" : "发送到当前会话"}
+                    {state.selectedAgentId === "grok-bot" ? "只追加到已登记输入框" : state.selectedAgentId === "workbuddy" ? "只写入 WorkBuddy 草稿" : "发送到当前会话"}
                   </>
                 )}
               </button>

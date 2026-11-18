@@ -41,7 +41,7 @@ export default function CurrentDisplayCard() {
   const previewMedia = resolveDashboardPreviewMedia(currentAppearance);
   const currentAgentId = currentDisplay.agentId;
   const detectedAgents = agentOptions.filter(
-    (a) => a.detected || a.id === currentAgentId || a.id === "deepseek-harness",
+    (a) => a.detected || a.id === currentAgentId || a.id === "deepseek-harness" || a.id === "grok-bot",
   );
 
   // --- Channel input -------------------------------------------------------

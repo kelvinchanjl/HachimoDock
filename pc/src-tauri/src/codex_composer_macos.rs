@@ -825,6 +825,145 @@ pub(super) fn capture_focused_text_target() -> Result<FocusedTextTarget, String>
     prepare_mimo_text_target(|| true)
 }
 
+pub(super) fn grok_bot_permission_granted() -> bool {
+    accessibility_permission_granted()
+}
+
+pub(super) fn read_focused_composer_identity() -> Result<crate::grok_bot_voice::ComposerIdentity, String> {
+    if !accessibility_permission_granted() {
+        return Err("permission_missing".into());
+    }
+    let system = AXUIElement::system_wide();
+    let app = ax_element_attribute(&system, "AXFocusedApplication").ok_or("focus_unavailable")?;
+    let mut pid = 0;
+    if unsafe { AXUIElementGetPid(app.as_concrete_TypeRef(), &mut pid) } != kAXErrorSuccess || pid <= 0 {
+        return Err("focus_unavailable".into());
+    }
+    let focused = ax_element_attribute(&app, "AXFocusedUIElement").ok_or("focus_unavailable")?;
+    let window = ax_element_attribute(&focused, "AXWindow")
+        .or_else(|| ax_element_attribute(&app, "AXFocusedWindow"));
+    let identifier = [
+        ax_string_attribute(&focused, "AXIdentifier"),
+        ax_string_attribute(&focused, "AXDOMIdentifier"),
+    ]
+    .into_iter()
+    .find(|value| !value.trim().is_empty())
+    .unwrap_or_default();
+    let process_name = NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
+        .and_then(|application| application.localizedName())
+        .map(|name| name.to_string())
+        .unwrap_or_default();
+    let foreground_pid = if NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
+        .is_some_and(|application| application.isActive())
+    {
+        pid
+    } else {
+        0
+    };
+    Ok(crate::grok_bot_voice::ComposerIdentity {
+        pid,
+        foreground_pid,
+        process_name,
+        role: ax_string_attribute(&focused, "AXRole"),
+        subrole: ax_string_attribute(&focused, "AXSubrole"),
+        identifier,
+        window_title: window.as_ref().map(|window| ax_string_attribute(window, "AXTitle")).unwrap_or_default(),
+        element_hash: unsafe { CFHash(focused.as_CFTypeRef()) } as u64,
+        window_hash: window.as_ref().map(|window| unsafe { CFHash(window.as_CFTypeRef()) } as u64).unwrap_or(0),
+        runtime_id: Vec::new(),
+    })
+}
+
+fn focused_element_value(expected: &crate::grok_bot_voice::ComposerIdentity) -> Result<String, String> {
+    let system = AXUIElement::system_wide();
+    let app = ax_element_attribute(&system, "AXFocusedApplication").ok_or("focus_unavailable")?;
+    let focused = ax_element_attribute(&app, "AXFocusedUIElement").ok_or("focus_unavailable")?;
+    let hash = unsafe { CFHash(focused.as_CFTypeRef()) } as u64;
+    if hash == 0 || hash != expected.element_hash {
+        return Err("focus_changed".into());
+    }
+    focused
+        .value()
+        .map_err(|_| "value_unreadable".to_string())?
+        .downcast::<CFString>()
+        .map(|value| value.to_string())
+        .ok_or_else(|| "value_unreadable".to_string())
+}
+
+pub(super) fn append_grok_bot_text(
+    expected: &crate::grok_bot_voice::ComposerIdentity,
+    text: &str,
+) -> Result<(), String> {
+    if !accessibility_permission_granted() {
+        return Err("permission_missing".into());
+    }
+    let live = read_focused_composer_identity()?;
+    if !crate::grok_bot_voice::identities_match(expected, &live) {
+        return Err("focus_changed".into());
+    }
+    let app = AXUIElement::application(expected.pid);
+    let mut snapshot = PasteboardSnapshot::capture().map_err(|_| "clipboard_busy".to_string())?;
+    let outcome = (|| {
+        let live = read_focused_composer_identity()?;
+        if !crate::grok_bot_voice::identities_match(expected, &live) {
+            return Err("focus_changed".into());
+        }
+        let before = focused_element_value(expected)?;
+        snapshot.set_text(text).map_err(|_| "clipboard_busy".to_string())?;
+        snapshot.verify_written().map_err(|_| "clipboard_busy".to_string())?;
+        let live = read_focused_composer_identity()?;
+        if !crate::grok_bot_voice::identities_match(expected, &live) {
+            return Err("focus_changed".into());
+        }
+        post_workbuddy_key(&app, MAC_KEYCODE_V, CGEventFlags::CGEventFlagCommand)
+            .map_err(|_| "input_failed".to_string())?;
+        let expected_value = format!("{before}{text}");
+        let deadline = Instant::now() + COMPOSER_READBACK_TIMEOUT;
+        loop {
+            let live = read_focused_composer_identity()?;
+            if !crate::grok_bot_voice::identities_match(expected, &live) {
+                return Err("focus_changed".into());
+            }
+            if focused_element_value(expected)? == expected_value {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err("write_unconfirmed".into());
+            }
+            thread::sleep(ACCESSIBILITY_TREE_RETRY_DELAY);
+        }
+    })();
+    snapshot.restore();
+    outcome
+}
+
+pub(super) fn submit_grok_bot_text(
+    expected: &crate::grok_bot_voice::ComposerIdentity,
+    text: &str,
+) -> Result<(), String> {
+    if !accessibility_permission_granted() {
+        return Err("permission_missing".into());
+    }
+    if text.trim().is_empty() {
+        return Err("empty_text".into());
+    }
+    let live = read_focused_composer_identity()?;
+    if !crate::grok_bot_voice::identities_match(expected, &live) {
+        return Err("focus_changed".into());
+    }
+    let value = focused_element_value(expected)?;
+    if !value.ends_with(text.trim()) {
+        return Err("draft_missing".into());
+    }
+    let live = read_focused_composer_identity()?;
+    if !crate::grok_bot_voice::identities_match(expected, &live) {
+        return Err("focus_changed".into());
+    }
+    let app = AXUIElement::application(expected.pid);
+    post_workbuddy_key(&app, KeyCode::RETURN, CGEventFlags::CGEventFlagNull)
+        .map_err(|_| "input_failed".to_string())
+}
+
 fn mimo_desktop_append(captured: &FocusedTextTarget, text: &str, original: &str) -> Result<(), String> {
     let app = AXUIElement::application(captured.pid);
     let assert_target = || -> Result<AXUIElement, String> {

@@ -18,3 +18,13 @@ test("MiMoCode platform limitations are surfaced before starting voice recogniti
     assert.equal(deviceVoicePlatformWarning(id, "macos"), "");
   }
 });
+
+test("Grok Bot voice is an opt-in desktop target and does not use another agent's transport", () => {
+  assert.equal(deviceVoiceTransportReady("grok-bot", "macos", false), true);
+  assert.equal(deviceVoiceTransportReady("grok-bot", "windows", false), true);
+  assert.equal(deviceVoiceTransportReady("grok-bot", "linux", false), false);
+  assert.equal(deviceVoicePlatformWarning("grok-bot", "macos"), "");
+  assert.equal(deviceVoicePlatformWarning("grok-bot", "windows"), "");
+  assert.match(deviceVoicePlatformWarning("grok-bot", "linux"), /不会向窗口输入/);
+  assert.equal(deviceVoicePlatformWarning("codex", "linux"), "");
+});

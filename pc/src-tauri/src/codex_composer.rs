@@ -59,6 +59,26 @@ pub fn submit_at_focused_text_target(target: &FocusedTextTarget) -> Result<(), S
     macos::submit_at_focused_text_target(&target.0)
 }
 
+#[cfg(target_os = "macos")]
+pub fn grok_bot_permission_granted() -> bool {
+    macos::grok_bot_permission_granted()
+}
+
+#[cfg(target_os = "macos")]
+pub fn capture_grok_bot_identity() -> Result<crate::grok_bot_voice::ComposerIdentity, String> {
+    macos::read_focused_composer_identity()
+}
+
+#[cfg(target_os = "macos")]
+pub fn append_grok_bot_text(expected: &crate::grok_bot_voice::ComposerIdentity, text: &str) -> Result<(), String> {
+    macos::append_grok_bot_text(expected, text)
+}
+
+#[cfg(target_os = "macos")]
+pub fn submit_grok_bot_text(expected: &crate::grok_bot_voice::ComposerIdentity, text: &str) -> Result<(), String> {
+    macos::submit_grok_bot_text(expected, text)
+}
+
 #[cfg(windows)]
 const CODEX_COMPOSER_STARTUP_TIMEOUT_SECS: u64 = 10;
 

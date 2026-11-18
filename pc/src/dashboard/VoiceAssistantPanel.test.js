@@ -18,6 +18,15 @@ test("VoiceAssistantPanel exports a default React component", () => {
   assert.match(source, /export default function VoiceAssistantPanel\s*\(/);
 });
 
+test("Grok Bot registration is explicit and does not request accessibility permission", () => {
+  const registration = source.split("function GrokBotVoiceRegistration(")[1].split("export default function VoiceAssistantPanel")[0];
+  assert.match(registration, /grok_bot_voice_preview/);
+  assert.match(registration, /grok_bot_voice_commit/);
+  assert.match(registration, /不会发送/);
+  assert.doesNotMatch(registration, /request_codex_accessibility_permission/);
+  assert.doesNotMatch(registration, /api\.x\.ai|sk-/);
+});
+
 test("Button config is no longer embedded (moved to BoardButtonPanel)", () => {
   assert.doesNotMatch(source, /BoardButtonConfigPanel/);
   assert.doesNotMatch(source, /BoardButtonPanel/);

@@ -1422,7 +1422,9 @@ export default function DeviceDashboard({ active = true, keyboardActive = false,
     const text = (voiceState.mockInjectInput || "").trim();
     if (!text || !selectedAgentId) return;
     voiceDispatch({ type: "set_mock_inject_pending", value: true });
-    const request = selectedAgentId === "workbuddy"
+    const request = selectedAgentId === "grok-bot"
+      ? invoke("append_grok_bot_voice_draft", { text })
+      : selectedAgentId === "workbuddy"
       ? invoke("write_workbuddy_voice_test_draft", { text })
       : postMockButtonInject({
       agentId: selectedAgentId,
@@ -1440,7 +1442,9 @@ export default function DeviceDashboard({ active = true, keyboardActive = false,
         voiceDispatch({
           type: "set_mock_inject_result",
           ok: true,
-          message: selectedAgentId === "workbuddy"
+          message: selectedAgentId === "grok-bot"
+            ? "已追加到已登记的 Grok Bot 输入框，未发送。"
+            : selectedAgentId === "workbuddy"
             ? "已追加到 WorkBuddy 草稿，未发送；请核对文字是否一致、有无截图蒙层。"
             : `已发送到当前会话 · ${sessionId}`,
           reply: response?.tokenPreview || "",

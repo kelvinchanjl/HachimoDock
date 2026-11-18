@@ -47,6 +47,11 @@ export const FIXED_AGENT_OPTIONS = [
     label: "Hermes Agent",
     detail: "跟随 Hermes 本地会话状态",
   },
+  {
+    id: "grok-bot",
+    label: "Grok Bot",
+    detail: "手动登记当前前台对话输入框；按住录音，松开只追加文字，另一次确认才发送",
+  },
 ];
 
 export function loadEnabledAgents() {
