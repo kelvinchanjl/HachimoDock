@@ -209,6 +209,14 @@ test("DeepSeek dictation identifies its actual final-only composer without promi
   assert.match(transcriptMessage({ agentId: "deepseek-harness" }, "partial", "visible"), /松开后一次写入/);
 });
 
+test("Grok Bot release stays a draft until a separate confirm", () => {
+  assert.match(transcriptMessage({ agentId: "grok-bot" }, "listening", "registered-composer"), /不自动发送/);
+  assert.match(transcriptMessage({ agentId: "grok-bot" }, "partial", "registered-composer"), /不自动发送/);
+  assert.match(transcriptMessage({ agentId: "grok-bot" }, "draft_ready", "registered-composer"), /才会发送/);
+  assert.match(transcriptMessage({ agentId: "grok-bot" }, "submitted", "registered-composer"), /已登记的 Grok Bot/);
+  assert.doesNotMatch(transcriptMessage({ agentId: "grok-bot" }, "draft_ready", "registered-composer"), /ChatGPT|已自动发送/);
+});
+
 
 test("uncertain submit is terminal unknown, never sent or a known rejection", () => {
   const ready = transcript(DEVICE_VOICE_ROUTER_INITIAL_STATE, {

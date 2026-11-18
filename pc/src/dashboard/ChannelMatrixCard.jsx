@@ -13,6 +13,7 @@ import {
   Braces,
   Code,
   Loader,
+  Mic,
   Terminal,
   UploadCloud,
   X,
@@ -21,6 +22,9 @@ import {
 import {
   appearanceById,
   channelLabelForId,
+  channelListPresentation,
+  isVoiceOnlyChannel,
+  voiceOnlyChannelNotice,
 } from "../lib/agent-appearance-config.js";
 import { BUILTIN_TERRIER_APPEARANCE_ID } from "../lib/builtin-appearances.js";
 import {
@@ -41,6 +45,7 @@ const AGENT_ICONS = {
   mimocode: Braces,
   workbuddy: Code,
   "deepseek-harness": Braces,
+  "grok-bot": Mic,
 };
 
 export const DSH_APPROVAL_NEVER_TIMEOUT_MS = 99999;
@@ -239,7 +244,11 @@ export default function ChannelMatrixCard() {
             indeterminate: true,
           },
       });
-      push({ tone: "success", title: notice || `已跟随 ${channelLabelForId(agentOptions, agentId)}` });
+      const voiceOnly = isVoiceOnlyChannel(agentOptions.find((agent) => agent.id === agentId));
+      push({
+        tone: "success",
+        title: voiceOnly ? voiceOnlyChannelNotice() : (notice || `已跟随 ${channelLabelForId(agentOptions, agentId)}`),
+      });
     } catch (err) {
       const msg = err?.message || String(err);
       const cancelled = msg === APPEARANCE_SYNC_CANCELLED_MESSAGE;
@@ -316,19 +325,19 @@ export default function ChannelMatrixCard() {
             const Icon = AGENT_ICONS[agent.id] || Code;
             const appearance = appearanceForAgent(agent.id);
             const isFollowed = activeAgentId === agent.id;
-            const isDetected = agent.detected === true;
+            const presentation = channelListPresentation(agent, activeAgentId);
             return (
               <article
                 key={agent.id}
-                className={`channel-row${isFollowed ? " is-active" : ""}${isDetected ? "" : " is-undetected"}`}
+                className={`channel-row ${presentation.rowClass}`}
                 aria-current={isFollowed ? "true" : undefined}
               >
                 <div className="channel-row__channel">
                   <span className="channel-row__icon"><Icon size={16} /></span>
                   <div className="channel-row__label">
                     <strong>{agent.label}</strong>
-                    <span className="channel-row__status" title={agent.detail || undefined}>
-                      {isDetected ? "已检测" : "未检测到客户端或 CLI"}
+                    <span className="channel-row__status" title={presentation.statusTitle}>
+                      {presentation.status}
                     </span>
                   </div>
                 </div>
@@ -349,8 +358,8 @@ export default function ChannelMatrixCard() {
                         type="button"
                         className="btn-secondary btn-sm channel-row__change-inline"
                         onClick={() => openPicker(agent.id)}
-                        disabled={syncing || !isDetected}
-                        title={!isDetected ? "安装对应客户端或 CLI 后重新扫描" : ""}
+                        disabled={syncing || presentation.appearanceDisabled}
+                        title={presentation.appearanceDisabled ? "安装对应客户端或 CLI 后重新扫描" : ""}
                       >
                         <ChevronDown size={14} /> 更换形象
                       </button>
@@ -398,24 +407,28 @@ export default function ChannelMatrixCard() {
                 </div>
 
                 <div className="channel-row__follow">
-                  {isFollowed ? (
+                  {presentation.followKind === "followed" ? (
                     <span className="channel-row__follow-current">已跟随</span>
-                  ) : !isDetected ? (
+                  ) : presentation.followKind === "unavailable" ? (
                     <span
                       className="channel-row__unavailable"
                       title="安装对应客户端或 CLI 后重新扫描"
                     >
                       不可用
                     </span>
+                  ) : presentation.followKind === "voice-current" ? (
+                    <span className="channel-row__follow-current" title={presentation.statusTitle}>语音目标</span>
                   ) : (
                     <button
                       type="button"
                       className="btn-primary btn-sm channel-row__follow-button"
                       onClick={() => requestFollow(agent.id)}
                       disabled={syncing || !canFollow}
-                      title={!canFollow ? "用 USB 连接，或与当前设备完成 Wi-Fi 配对" : ""}
+                      title={presentation.voiceOnly
+                        ? "只把按键语音交到这个目标，不跟随思考或输入状态"
+                        : (!canFollow ? "用 USB 连接，或与当前设备完成 Wi-Fi 配对" : "")}
                     >
-                      跟随
+                      {presentation.followLabel}
                     </button>
                   )}
                 </div>
@@ -444,6 +457,7 @@ export default function ChannelMatrixCard() {
           appearanceName={pendingFollow.appearance?.name || "西高地小狗"}
           reusesCurrentAppearance={pendingFollow.appearance?.id === currentDisplay.appearance?.id}
           wifiFollow={Boolean(wifi)}
+          voiceOnly={isVoiceOnlyChannel(agentOptions.find((agent) => agent.id === pendingFollow.agentId))}
           syncing={syncing}
           onCancel={() => setPendingFollow(null)}
           onConfirm={confirmFollow}
@@ -534,6 +548,7 @@ function FollowAgentConfirmModal({
   appearanceName,
   reusesCurrentAppearance,
   wifiFollow,
+  voiceOnly,
   syncing,
   onCancel,
   onConfirm,
@@ -543,8 +558,12 @@ function FollowAgentConfirmModal({
       <div className="modal-card channel-switch-confirm-modal" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
           <div>
-            <h3 className="modal-title">切换跟随 Agent</h3>
-            <div className="modal-subtitle">设备端同一时间只展示一个 Agent 的实时状态。</div>
+            <h3 className="modal-title">{voiceOnly ? "设为语音输入目标" : "切换跟随 Agent"}</h3>
+            <div className="modal-subtitle">
+              {voiceOnly
+                ? "这只切换按键语音写入的桌面目标，桌宠不会跟随思考或输入状态。"
+                : "设备端同一时间只展示一个 Agent 的实时状态。"}
+            </div>
           </div>
           <button className="icon-btn" onClick={onCancel} aria-label="关闭" disabled={syncing}>
             <X size={16} />
@@ -552,7 +571,9 @@ function FollowAgentConfirmModal({
         </div>
         <div className="modal-body channel-switch-confirm-modal__body">
           <div className="message-banner message-banner--muted channel-switch-confirm-modal__message">
-            将设备端跟随的 Agent 从 {currentLabel || "当前 Agent"} 切换为 {nextLabel || "目标 Agent"}。
+            {voiceOnly
+              ? `按键语音目标将从 ${currentLabel || "当前目标"} 改为 ${nextLabel || "Grok Bot"}。松开录音只追加文字，另一次确认才发送。`
+              : `将设备端跟随的 Agent 从 ${currentLabel || "当前 Agent"} 切换为 ${nextLabel || "目标 Agent"}。`}
             {wifiFollow ? "通过 Wi-Fi 切换时，设备继续使用当前形象。"
               : reusesCurrentAppearance ? `继续使用「${appearanceName}」。` : `同时同步「${appearanceName}」到设备。`}
           </div>
@@ -563,7 +584,7 @@ function FollowAgentConfirmModal({
           </button>
           <button className="btn-primary" type="button" onClick={onConfirm} disabled={syncing}>
             {syncing && <Loader size={14} className="spin" />}
-            确认跟随
+            {voiceOnly ? "确认语音目标" : "确认跟随"}
           </button>
         </div>
       </div>

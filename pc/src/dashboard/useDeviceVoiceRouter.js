@@ -301,6 +301,16 @@ export function deviceVoiceRouterReducer(state, action) {
 }
 
 export function transcriptMessage(payload, phase, composerMode) {
+  if (normalizeText(payload?.agentId).toLowerCase() === "grok-bot") {
+    if (phase === "listening" || phase === "partial") {
+      return "正在聆听；松开后只把识别文字追加到已登记的 Grok Bot 输入框，不自动发送。";
+    }
+    if (phase === "draft_ready") {
+      return "识别文字已追加到已登记的 Grok Bot 输入框。短按确认键或摇杆后才会发送。";
+    }
+    if (phase === "submitting") return "已收到单独的确认操作，正在向已登记的 Grok Bot 输入框发送。";
+    if (phase === "submitted") return "已向已登记的 Grok Bot 输入框发送。这不是 Grok Bot 已读回执。";
+  }
   const visibleAgentLabel = normalizeText(payload?.agentId).toLowerCase() === "deepseek-harness" ? "DeepSeek Harness" : normalizeText(payload?.agentId).toLowerCase() === "workbuddy" ? "WorkBuddy" : normalizeText(payload?.agentId).toLowerCase() === "claude-code"
     ? "Claude"
     : "ChatGPT（Codex）";

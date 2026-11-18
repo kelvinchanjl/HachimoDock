@@ -26,16 +26,23 @@ test("ChannelMatrixCard has a default export", () => {
 });
 
 test("ChannelMatrixCard keeps supported agents visible and marks unavailable clients or CLIs", () => {
+  const presentation = readFileSync(join(here, "../lib/agent-appearance-config.js"), "utf8");
   assert.match(source, /visibleAgents/);
   assert.match(source, /agentOptions\.filter\(\(agent\) => agent\?\.id\)/);
   assert.match(source, /visibleAgents\.map\s*\(/);
-  assert.match(source, /is-undetected/);
-  assert.match(source, /未检测到客户端或 CLI/);
+  assert.match(source, /channelListPresentation/);
+  assert.match(presentation, /is-undetected/);
+  assert.match(presentation, /未检测到客户端或 CLI/);
   assert.match(source, /安装对应客户端或 CLI 后重新扫描/);
-  assert.match(source, /disabled=\{syncing \|\| !isDetected\}/);
-  assert.match(source, /!isDetected \? \(/);
+  assert.match(source, /presentation\.appearanceDisabled/);
+  assert.match(source, /followKind === "unavailable"/);
   assert.match(source, /className="channel-row__unavailable"/);
   assert.match(source, /不可用/);
+  assert.match(presentation, /状态跟随不可用/);
+  assert.match(presentation, /用于语音/);
+  assert.match(source, /语音目标/);
+  assert.match(source, /设为语音输入目标/);
+  assert.doesNotMatch(source, /grok-bot[\s\S]{0,80}已检测/);
   assert.match(source, /const canFollow = Boolean\(usb\?\.connected \|\| wifi\)/);
   assert.match(source, /disabled=\{syncing \|\| !canFollow\}/);
   assert.match(source, /followAgent\(agentId, appearance/);
@@ -61,10 +68,11 @@ test("ChannelMatrixCard destructures multiple fields from useDeviceContext", () 
 });
 
 test("ChannelMatrixCard applies is-active class to the active channel row", () => {
-  assert.match(source, /is-active/);
+  const presentation = readFileSync(join(here, "../lib/agent-appearance-config.js"), "utf8");
+  assert.match(source, /presentation\.rowClass/);
   assert.match(source, /isFollowed/);
-  // Must be conditional based on active channel
-  assert.match(source, /isFollowed\s*\?\s*["'].*is-active.*["']/);
+  assert.match(presentation, /is-active/);
+  assert.match(presentation, /selected \? "is-active is-voice-only"/);
 });
 
 test("Non-followed agents show a follow button while the active one is marked followed", () => {
