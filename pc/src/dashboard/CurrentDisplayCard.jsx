@@ -13,7 +13,10 @@ import { resolveDashboardPreviewMedia } from "../lib/appearance-preview.js";
 import {
   appearanceById,
   channelLabelForId,
+  channelOptionLabel,
+  isVoiceOnlyChannel,
   shouldConfirmChannelSwitch,
+  voiceOnlyChannelNotice,
 } from "../lib/agent-appearance-config.js";
 import {
   APPEARANCE_CHANGE_USB_REQUIRED_MESSAGE,
@@ -59,7 +62,11 @@ export default function CurrentDisplayCard() {
         const { notice } = await applyDesktopPet(nextAgentId, nextAppearance, {
           onProgress: (p) => push({ tone: "info", title: p.text, ttl: 2000 }),
         });
-        push({ tone: "success", title: notice });
+        const nextAgent = agentOptions.find((agent) => agent.id === nextAgentId);
+        push({
+          tone: "success",
+          title: isVoiceOnlyChannel(nextAgent) ? voiceOnlyChannelNotice() : notice,
+        });
       } catch (err) {
         const msg = err?.message || String(err);
         const tone =
@@ -72,7 +79,7 @@ export default function CurrentDisplayCard() {
         setSyncing(false);
       }
     },
-    [agentAppearanceMap, appearances, applyDesktopPet, currentDisplay, push],
+    [agentAppearanceMap, agentOptions, appearances, applyDesktopPet, currentDisplay, push],
   );
 
   const handleChannelChange = useCallback(
@@ -166,7 +173,7 @@ export default function CurrentDisplayCard() {
             >
               {detectedAgents.map((agent) => (
                 <option key={agent.id} value={agent.id}>
-                  {agent.label}
+                  {channelOptionLabel(agent)}
                 </option>
               ))}
             </select>
@@ -212,6 +219,7 @@ export default function CurrentDisplayCard() {
         <ChannelSwitchConfirmModal
           currentLabel={channelLabelForId(agentOptions, currentAgentId)}
           nextLabel={channelLabelForId(agentOptions, pendingChannel)}
+          voiceOnly={isVoiceOnlyChannel(agentOptions.find((agent) => agent.id === pendingChannel))}
           onCancel={() => setPendingChannel(null)}
           onConfirm={confirmPendingChannel}
         />

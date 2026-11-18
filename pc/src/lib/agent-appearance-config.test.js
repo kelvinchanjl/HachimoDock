@@ -14,8 +14,13 @@ import {
   DEFAULT_AGENT_ID,
   ENABLED_AGENTS_STORAGE_KEY,
   FIXED_AGENT_OPTIONS,
+  channelListPresentation,
+  channelOptionLabel,
+  isVoiceOnlyChannel,
   loadEnabledAgents,
   normalizeDetectedAgents,
+  saveEnabledAgents,
+  voiceOnlyChannelNotice,
   pickFirstDetectedAgentId,
   sanitizeAgentAppearanceMap,
   shouldConfirmChannelSwitch,
@@ -52,6 +57,43 @@ test("the fixed Agents put ChatGPT（Codex） first and use it as the first-run 
     FIXED_AGENT_OPTIONS.slice(0, 2).map((agent) => agent.label),
     ["ChatGPT（Codex）", "Claude"],
   );
+});
+
+test("Grok Bot stays selectable for voice without a detected or activity-follow status", () => {
+  const agents = normalizeDetectedAgents([
+    { id: "codex", detected: true, detail: "installed" },
+    { id: "grok-bot", detected: true, detail: "fake telemetry", activityFollow: true },
+  ]);
+  const grok = agents.find((agent) => agent.id === "grok-bot");
+  const codex = agents.find((agent) => agent.id === "codex");
+  assert.equal(agents.some((agent) => agent.id === "grok-bot"), true);
+  assert.equal(grok.detected, false);
+  assert.equal(grok.activityFollow, false);
+  assert.equal(grok.voiceInput, true);
+  assert.equal(grok.detail.includes("fake"), false);
+  assert.equal(isVoiceOnlyChannel(grok), true);
+  assert.equal(codex.detected, true);
+  assert.equal(codex.activityFollow, true);
+
+  const idle = channelListPresentation(grok, "codex");
+  assert.equal(idle.status, "状态跟随不可用");
+  assert.equal(idle.followLabel, "用于语音");
+  assert.equal(idle.appearanceDisabled, false);
+  assert.equal(idle.followLabel === "已跟随" || idle.followLabel === "不可用", false);
+
+  const selected = channelListPresentation(grok, "grok-bot");
+  assert.equal(selected.followLabel, "语音目标");
+  assert.match(selected.rowClass, /is-voice-only/);
+  assert.doesNotMatch(selected.rowClass, /is-undetected/);
+  assert.equal(channelOptionLabel(grok), "Grok Bot（语音输入，状态不可跟随）");
+  assert.equal(channelListPresentation(codex, "codex").followLabel, "已跟随");
+  assert.equal(channelListPresentation({ id: "hermes", detected: false, label: "Hermes Agent" }, "codex").followLabel, "不可用");
+
+  installStorage();
+  saveEnabledAgents(toSingleAgentSet(["grok-bot"]));
+  assert.deepEqual([...loadEnabledAgents()], ["grok-bot"]);
+  assert.equal(JSON.parse(globalThis.localStorage.getItem(ENABLED_AGENTS_STORAGE_KEY))[0], "grok-bot");
+  assert.match(voiceOnlyChannelNotice(), /不会跟随/);
 });
 
 test("assignAppearanceToAgent keeps one channel bound to at most one appearance", () => {

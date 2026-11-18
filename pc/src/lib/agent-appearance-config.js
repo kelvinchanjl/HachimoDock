@@ -50,7 +50,9 @@ export const FIXED_AGENT_OPTIONS = [
   {
     id: "grok-bot",
     label: "Grok Bot",
-    detail: "手动登记当前前台对话输入框；按住录音，松开只追加文字，另一次确认才发送",
+    detail: "按键语音可写入已登记的前台输入框。没有公开的思考或输入状态，桌宠不会跟随 Grok Bot 的工作状态。",
+    voiceInput: true,
+    activityFollow: false,
   },
 ];
 
@@ -66,17 +68,60 @@ export function saveEnabledAgents(set) {
   localStorage.setItem(ENABLED_AGENTS_STORAGE_KEY, JSON.stringify([...set]));
 }
 
+export function isVoiceOnlyChannel(agent) {
+  return agent?.id === "grok-bot" || (agent?.voiceInput === true && agent?.activityFollow === false);
+}
+
+export function voiceOnlyChannelNotice() {
+  return "已把按键语音目标设为 Grok Bot。桌宠不会跟随它的思考或输入状态。";
+}
+
+export function channelOptionLabel(agent) {
+  if (isVoiceOnlyChannel(agent)) return `${agent.label}（语音输入，状态不可跟随）`;
+  return agent?.label || "";
+}
+
+export function channelListPresentation(agent, activeAgentId = "") {
+  const selected = Boolean(agent?.id) && agent.id === activeAgentId;
+  if (isVoiceOnlyChannel(agent)) {
+    return {
+      voiceOnly: true,
+      detected: false,
+      rowClass: selected ? "is-active is-voice-only" : "is-voice-only",
+      status: "状态跟随不可用",
+      statusTitle: agent.detail || "没有公开的工作状态接口。",
+      appearanceDisabled: false,
+      followKind: selected ? "voice-current" : "voice-select",
+      followLabel: selected ? "语音目标" : "用于语音",
+    };
+  }
+  const detected = agent?.detected === true;
+  return {
+    voiceOnly: false,
+    detected,
+    rowClass: `${selected ? "is-active" : ""}${detected ? "" : " is-undetected"}`.trim(),
+    status: detected ? "已检测" : "未检测到客户端或 CLI",
+    statusTitle: agent?.detail || undefined,
+    appearanceDisabled: !detected,
+    followKind: selected ? "followed" : detected ? "follow" : "unavailable",
+    followLabel: selected ? "已跟随" : detected ? "跟随" : "不可用",
+  };
+}
+
 export function normalizeDetectedAgents(agents = []) {
   const detectedById = new Map((agents || []).map((agent) => [agent.id, agent]));
   return FIXED_AGENT_OPTIONS.map((option) => {
     const detected = detectedById.get(option.id);
+    const voiceOnly = isVoiceOnlyChannel(option);
     return {
       ...option,
       ...(detected || {}),
       // Keep product-facing names stable even when an older bridge scan is cached.
       label: option.label,
-      detail: detected?.detail || option.detail,
-      detected: Boolean(detected?.detected),
+      detail: voiceOnly ? option.detail : (detected?.detail || option.detail),
+      detected: voiceOnly ? false : Boolean(detected?.detected),
+      voiceInput: voiceOnly ? true : option.voiceInput === true,
+      activityFollow: voiceOnly ? false : option.activityFollow !== false,
     };
   });
 }

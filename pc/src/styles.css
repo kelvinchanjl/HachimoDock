@@ -13773,6 +13773,14 @@ select:focus-visible {
   opacity: 0.58;
 }
 
+.channel-row.is-voice-only {
+  border-style: solid;
+}
+
+.channel-row.is-voice-only .channel-row__status {
+  color: var(--text-muted);
+}
+
 .channel-row__channel {
   display: flex;
   align-items: center;
